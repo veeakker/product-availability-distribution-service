@@ -45,7 +45,7 @@ async function removeOfferingsAvailableAtOrFromForSuppliersWithoutConstraints() 
             ?business ext:disallowedProductGroup ?group.
           }
           ?offering gr:availableAtOrFrom ?business.
-        } LIMIT 100
+        } ORDER BY ?business LIMIT 100 # order by to work around Virtuoso bug
       }
     }`);
 }
@@ -95,12 +95,9 @@ async function hasOfferingsWhichNeedExtraBusinessEntities() {
 
       # Query early for result set limitation and require the filter to require binding.
       {
-        SELECT ?hasProductGroup {
+        SELECT DISTINCT ?business {
           ?business ext:disallowedProductGroup ?hasProductGroup.
-        } LIMIT 1
-      }
-      FILTER EXISTS {
-        ?business ext:disallowedProductGroup ?hasProductGroup.
+        }
       }
 
       ?offering a gr:Offering.
@@ -130,12 +127,9 @@ async function addSuppliersForOfferingsWhichHaveNegativeConstraints() {
           a gr:BusinessEntity.
 
         {
-          SELECT ?hasProductGroup {
+          SELECT DISTINCT ?business {
             ?business ext:disallowedProductGroup ?hasProductGroup.
-          } LIMIT 1
-        }
-        FILTER EXISTS {
-            ?business ext:disallowedProductGroup ?hasProductGroup.
+          }
         }
 
         ?offering a gr:Offering.
@@ -147,7 +141,7 @@ async function addSuppliersForOfferingsWhichHaveNegativeConstraints() {
         FILTER NOT EXISTS {
           ?offering gr:includesObject/gr:typeOfGood/^veeakker:hasProduct/skos:broader?/^ext:disallowedProductGroup ?business.
         }
-      } LIMIT 100
+      } ORDER BY ?business LIMIT 100 # order is not needed but works around a Virtuoso bug
     }
   }`));
 }
@@ -163,12 +157,9 @@ async function hasOfferingsWhichHaveExtraBusinessEntities() {
         a gr:BusinessEntity.
 
       {
-        SELECT ?hasProductGroup {
+        SELECT DISTINCT ?business {
           ?business ext:disallowedProductGroup ?hasProductGroup.
-        } LIMIT 1
-      }
-      FILTER EXISTS {
-        ?business ext:disallowedProductGroup ?hasProductGroup.
+        }
       }
 
       ?offering a gr:Offering;
@@ -190,19 +181,16 @@ async function removeSuppliersForOfferingsWhichLackNegativeConstraints() {
              a gr:BusinessEntity.
 
            {
-             SELECT ?hasProductGroup {
+             SELECT DISTINCT ?business {
                ?business ext:disallowedProductGroup ?hasProductGroup.
-             } LIMIT 1
-           }
-           FILTER EXISTS {
-             ?business ext:disallowedProductGroup ?hasProductGroup.
+             }
            }
 
            ?offering a gr:Offering;
              gr:availableAtOrFrom ?business.
 
            ?offering gr:includesObject/gr:typeOfGood/^veeakker:hasProduct/skos:broader?/^ext:disallowedProductGroup ?business.
-        } LIMIT 100
+        } ORDER BY ?business LIMIT 100  # order by to work around Virtuoso bug
       }
     }`);
 }
