@@ -31,7 +31,7 @@ async function hasSuppliersWithoutConstraintsWhichHaveOfferings() {
 }
 
 /**
- * Removes (at most 100) relations from offering to a business which has no specified constraints.
+ * Removes a batch of relations from offering to a business which has no specified constraints.
  */
 async function removeOfferingsAvailableAtOrFromForSuppliersWithoutConstraints() {
   await update(`${PREFIXES}
@@ -113,7 +113,7 @@ async function hasOfferingsWhichNeedExtraBusinessEntities() {
 }
 
 /**
- * Adds (at most 100) incorrect relations from offering to business.
+ * Adds a batch of incorrect relations from offering to business.
  */
 async function addSuppliersForOfferingsWhichHaveNegativeConstraints() {
   return (await update(`${PREFIXES}
@@ -195,42 +195,315 @@ async function removeSuppliersForOfferingsWhichLackNegativeConstraints() {
     }`);
 }
 
-app.post('/distribute', async function ( req, res ) {
+/**
+ * SHOP DISTRIBUTION
+ *
+ * We serve products which could be delivered based on:
+ *
+ * - veeakker:hasSupplier :: a shop mainly selects the products from a given supplier
+ * - veeakker:hasDeliveryPlace :: the product must be available at a delivery place
+ * - veeakker:disallowedProductGroup :: shops can disable whole product groups
+ */
+
+/**
+ * Checks whether there are offering/shop links left for shops that have no constraints.
+ */
+async function hasShopOfferingsForUnconstrainedShops() {
+  return (await query(`${PREFIXES}
+    ASK {
+      ?offering veeakker:offeredByShop ?shop.
+      FILTER NOT EXISTS {
+        {
+          ?shop veeakker:hasDeliveryPlace ?any.
+        } UNION {
+          ?shop veeakker:disallowedProductGroup ?any.
+        } UNION {
+          ?shop veeakker:hasSupplier ?any.
+        }
+      }
+    }`)).boolean;
+}
+
+/**
+ * Removes a batch of offering/shop links for shops that have no constraints.
+ */
+async function removeShopOfferingsForUnconstrainedShops() {
+  await update(`${PREFIXES}
+    DELETE {
+      ?offering veeakker:offeredByShop ?shop.
+    } WHERE {
+      {
+        SELECT DISTINCT ?offering ?shop {
+          ?offering veeakker:offeredByShop ?shop.
+          FILTER NOT EXISTS {
+            {
+              ?shop veeakker:hasDeliveryPlace ?any.
+            } UNION {
+              ?shop veeakker:disallowedProductGroup ?any.
+            } UNION {
+              ?shop veeakker:hasSupplier ?any.
+            }
+          }
+        } ORDER BY ?shop LIMIT 100 # order by to work around Virtuoso bug
+      }
+    }`);
+}
+
+// * remove shop links that violate the location constraint
+//
+// An offering qualifies for a shop when a supplier carrying it
+// (gr:availableAtOrFrom) delivers to a delivery place the shop serves. Both
+// shops and business entities use veeakker:hasDeliveryPlace, so the path
+// veeakker:hasDeliveryPlace/^veeakker:hasDeliveryPlace/^gr:availableAtOrFrom
+// connects shop → place → business → offering. The outer ?anyPlace ensures
+// the constraint only applies to shops that actually have delivery places;
+// shops without them are decided by the other dimensions.
+
+/**
+ * Checks whether there are offering/shop links which need removal for location constraint.
+ */
+async function hasShopOfferingsViolatingLocationConstraint() {
+  return (await query(`${PREFIXES}
+    ASK {
+      ?offering veeakker:offeredByShop ?shop.
+      ?shop veeakker:hasDeliveryPlace ?anyPlace.
+      FILTER NOT EXISTS {
+        ?shop veeakker:hasDeliveryPlace/^veeakker:hasDeliveryPlace/^gr:availableAtOrFrom ?offering.
+      }
+    }`)).boolean;
+}
+
+/**
+ * Removes a batch of offering/shop links that violate the location constraint.
+ */
+async function removeShopOfferingsViolatingLocationConstraint() {
+  await update(`${PREFIXES}
+    DELETE {
+      ?offering veeakker:offeredByShop ?shop.
+    } WHERE {
+      {
+        SELECT DISTINCT ?offering ?shop {
+          ?offering veeakker:offeredByShop ?shop.
+          ?shop veeakker:hasDeliveryPlace ?anyPlace.
+          FILTER NOT EXISTS {
+            ?shop veeakker:hasDeliveryPlace/^veeakker:hasDeliveryPlace/^gr:availableAtOrFrom ?offering.
+          }
+        } ORDER BY ?shop LIMIT 100 # order by to work around Virtuoso bug
+      }
+    }`);
+}
+
+// * remove shop links that violate the product-group constraint
+
+/**
+ * Checks whether there are offering/shop links left where the offering's
+ * product is in one of the shop's disallowed product groups.
+ */
+async function hasShopOfferingsViolatingProductGroupConstraint() {
+  return (await query(`${PREFIXES}
+    ASK {
+      ?offering veeakker:offeredByShop ?shop.
+      ?offering gr:includesObject/gr:typeOfGood/^veeakker:hasProduct/skos:broader?/^veeakker:disallowedProductGroup ?shop.
+    }`)).boolean;
+}
+
+/**
+ * Removes a batch of offering/shop links that violate the product-group constraint.
+ */
+async function removeShopOfferingsViolatingProductGroupConstraint() {
+  await update(`${PREFIXES}
+    DELETE {
+      ?offering veeakker:offeredByShop ?shop.
+    } WHERE {
+      {
+        SELECT DISTINCT ?offering ?shop {
+          ?offering veeakker:offeredByShop ?shop.
+          ?offering gr:includesObject/gr:typeOfGood/^veeakker:hasProduct/skos:broader?/^veeakker:disallowedProductGroup ?shop.
+        } ORDER BY ?shop LIMIT 100 # order by to work around Virtuoso bug
+      }
+    }`);
+}
+
+// * remove shop links that violate the supplier constraint
+
+/**
+ * Checks whether there are offering/shop links left where the shop has a
+ * supplier allow-list but the offering's supplier is not on it.
+ */
+async function hasShopOfferingsViolatingSupplierConstraint() {
+  return (await query(`${PREFIXES}
+    ASK {
+      ?offering veeakker:offeredByShop ?shop.
+      ?shop veeakker:hasSupplier ?anySupplier.
+      FILTER NOT EXISTS {
+        ?shop veeakker:hasSupplier/gr:offers ?offering.
+      }
+    }`)).boolean;
+}
+
+/**
+ * Removes a batch of offering/shop links that violate the supplier constraint.
+ */
+async function removeShopOfferingsViolatingSupplierConstraint() {
+  await update(`${PREFIXES}
+    DELETE {
+      ?offering veeakker:offeredByShop ?shop.
+    } WHERE {
+      {
+        SELECT DISTINCT ?offering ?shop {
+          ?offering veeakker:offeredByShop ?shop.
+          ?shop veeakker:hasSupplier ?anySupplier.
+          FILTER NOT EXISTS {
+            ?shop veeakker:hasSupplier/gr:offers ?offering.
+          }
+        } ORDER BY ?shop LIMIT 100 # order by to work around Virtuoso bug
+      }
+    }`);
+}
+
+// * add shop links that satisfy all three constraints
+
+/**
+ * Checks whether there are offering/shop pairs that pass all three
+ * constraints but are not linked yet.
+ */
+async function hasShopOfferingsWhichNeedLinks() {
+  return (await query(`${PREFIXES}
+    ASK {
+      ?shop a veeakker:Shop.
+      ?offering a gr:Offering.
+      FILTER EXISTS {
+        {
+          ?shop veeakker:hasDeliveryPlace ?any.
+        } UNION {
+          ?shop veeakker:disallowedProductGroup ?any.
+        } UNION {
+          ?shop veeakker:hasSupplier ?any.
+        }
+      }
+      FILTER NOT EXISTS {
+        ?offering veeakker:offeredByShop ?shop.
+      }
+      FILTER NOT EXISTS {
+        ?shop veeakker:hasDeliveryPlace ?anyPlace.
+        FILTER NOT EXISTS {
+          ?shop veeakker:hasDeliveryPlace/^veeakker:hasDeliveryPlace/^gr:availableAtOrFrom ?offering.
+        }
+      }
+      FILTER NOT EXISTS {
+        ?offering gr:includesObject/gr:typeOfGood/^veeakker:hasProduct/skos:broader?/^veeakker:disallowedProductGroup ?shop.
+      }
+      FILTER NOT EXISTS {
+        ?shop veeakker:hasSupplier ?anySupplier.
+        FILTER NOT EXISTS {
+          ?shop veeakker:hasSupplier/gr:offers ?offering.
+        }
+      }
+    }`)).boolean;
+}
+
+/**
+ * Adds a batch of offering/shop links for pairs that satisfy all three
+ * constraints. The nested FILTER NOT EXISTS expresses "no constraint set OR
+ * constraint satisfied" for the positive allow-list (suppliers) and
+ * positive-places (delivery-places) dimensions.
+ */
+async function addShopOfferingsWhichSatisfyConstraints() {
+  await update(`${PREFIXES}
+    INSERT {
+      ?offering veeakker:offeredByShop ?shop.
+    } WHERE {
+      {
+        SELECT DISTINCT ?offering ?shop {
+          ?shop a veeakker:Shop.
+          ?offering a gr:Offering.
+          FILTER EXISTS {
+            {
+              ?shop veeakker:hasDeliveryPlace ?any.
+            } UNION {
+              ?shop veeakker:disallowedProductGroup ?any.
+            } UNION {
+              ?shop veeakker:hasSupplier ?any.
+            }
+          }
+          FILTER NOT EXISTS {
+            ?offering veeakker:offeredByShop ?shop.
+          }
+          FILTER NOT EXISTS {
+            ?shop veeakker:hasDeliveryPlace ?anyPlace.
+            FILTER NOT EXISTS {
+              ?shop veeakker:hasDeliveryPlace/^veeakker:hasDeliveryPlace/^gr:availableAtOrFrom ?offering.
+            }
+          }
+          FILTER NOT EXISTS {
+            ?offering gr:includesObject/gr:typeOfGood/^veeakker:hasProduct/skos:broader?/^veeakker:disallowedProductGroup ?shop.
+          }
+          FILTER NOT EXISTS {
+            ?shop veeakker:hasSupplier ?anySupplier.
+            FILTER NOT EXISTS {
+              ?shop veeakker:hasSupplier/gr:offers ?offering.
+            }
+          }
+        } ORDER BY ?shop LIMIT 100 # order by to work around Virtuoso bug
+      }
+    }`);
+}
+
+async function distributeShops() {
+  console.log("Starting distribution of offerings' shops");
+  // remove links for shops that have no constraints on any dimension
+  while ( await hasShopOfferingsForUnconstrainedShops() ) {
+    await removeShopOfferingsForUnconstrainedShops();
+  }
+  while ( await hasShopOfferingsViolatingLocationConstraint() ) {
+    await removeShopOfferingsViolatingLocationConstraint();
+  }
+  while ( await hasShopOfferingsViolatingProductGroupConstraint() ) {
+    await removeShopOfferingsViolatingProductGroupConstraint();
+  }
+  while ( await hasShopOfferingsViolatingSupplierConstraint() ) {
+    await removeShopOfferingsViolatingSupplierConstraint();
+  }
+  while ( await hasShopOfferingsWhichNeedLinks() ) {
+    await addShopOfferingsWhichSatisfyConstraints();
+  }
+  console.log("Shop distribution complete.");
+}
+
+async function distributeLocations() {
   console.log("Starting distribution of offerings' locations");
 
+  while ( await hasSuppliersWithoutConstraintsWhichHaveOfferings() ) {
+    await removeOfferingsAvailableAtOrFromForSuppliersWithoutConstraints();
+  }
+
+  while ( await hasOfferingsWhichNeedExtraBusinessEntities() ) {
+    await addSuppliersForOfferingsWhichHaveNegativeConstraints();
+  }
+
+  while ( await hasOfferingsWhichHaveExtraBusinessEntities() ) {
+    await removeSuppliersForOfferingsWhichLackNegativeConstraints();
+  }
+
+  console.log("Location distribution complete.");
+}
+
+async function distributeAll() {
+  await distributeLocations();
+  await distributeShops();
+}
+
+app.post('/distribute', async function ( req, res ) {
   try {
-    // remove labeled suppliers which don't have constraints anymore
-    while ( await hasSuppliersWithoutConstraintsWhichHaveOfferings() ) {
-      await removeOfferingsAvailableAtOrFromForSuppliersWithoutConstraints();
-    }
-
-    // add suppliers for labels which lack negative constraints
-    while ( await hasOfferingsWhichNeedExtraBusinessEntities() ) {
-      await addSuppliersForOfferingsWhichHaveNegativeConstraints();
-    }
-
-    // remove suppliers for labels which have negative constraints
-    while ( await hasOfferingsWhichHaveExtraBusinessEntities() ) {
-      await removeSuppliersForOfferingsWhichLackNegativeConstraints();
-    }
-
-    console.log("Location distribution complete.");
+    await distributeAll();
     res
       .status(200)
-      .send(JSON.stringify(
-        {
-          status: "ok"
-        }));
+      .send(JSON.stringify({status: "ok"}));
   } catch (e) {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify(
-        {
-          status: "error",
-          code: "500",
-          message: e.stringify()
-        }));
+      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
   }
 });
 
@@ -242,20 +515,12 @@ app.post('/clean-suppliers-without-constraints', async (_req,res) => {
     }
     res
       .status(200)
-      .send(JSON.stringify(
-        {
-          status: "ok"
-        }));
+      .send(JSON.stringify({status: "ok"}));
   } catch (e) {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify(
-        {
-          status: "error",
-          code: "500",
-          message: e.stringify()
-        }));
+      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
   }
 });
 
@@ -267,20 +532,12 @@ app.post('/add-suppliers', async (_req,res) => {
     }
     res
       .status(200)
-      .send(JSON.stringify(
-        {
-          status: "ok"
-        }));
+      .send(JSON.stringify({status: "ok"}));
   } catch (e) {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify(
-        {
-          status: "error",
-          code: "500",
-          message: e.stringify()
-        }));
+      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
   }
 });
 
@@ -292,21 +549,33 @@ app.post('/remove-suppliers', async (_req,res) => {
     }
     res
       .status(200)
-      .send(JSON.stringify(
-        {
-          status: "ok"
-        }));
+      .send(JSON.stringify({status: "ok"}));
   } catch (e) {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify(
-        {
-          status: "error",
-          code: "500",
-          message: e.stringify()
-        }));
+      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
+  }
+});
+
+app.post('/distribute-shops', async (_req,res) => {
+  try {
+    await distributeShops();
+    res
+      .status(200)
+      .send(JSON.stringify({status: "ok"}));
+  } catch (e) {
+    console.error(`error ${e} occurred`);
+    res
+      .status(500)
+      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
   }
 });
 
 app.use(errorHandler);
+
+// Run a full distribution pass on startup so the triplestore is consistent
+// even when no delta messages are pending — e.g. after a restore, or while the
+// service was down during triple changes. The pass is idempotent: each phase
+// is guarded by an ASK query and is a no-op when there is nothing to do.
+distributeAll().catch(e => console.error(`Startup distribution failed: ${e}`));
