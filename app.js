@@ -503,7 +503,7 @@ app.post('/distribute', async function ( req, res ) {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
+      .send(JSON.stringify({status: "error", code: "500", message: String(e)}));
   }
 });
 
@@ -520,7 +520,7 @@ app.post('/clean-suppliers-without-constraints', async (_req,res) => {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
+      .send(JSON.stringify({status: "error", code: "500", message: String(e)}));
   }
 });
 
@@ -537,7 +537,7 @@ app.post('/add-suppliers', async (_req,res) => {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
+      .send(JSON.stringify({status: "error", code: "500", message: String(e)}));
   }
 });
 
@@ -554,7 +554,7 @@ app.post('/remove-suppliers', async (_req,res) => {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
+      .send(JSON.stringify({status: "error", code: "500", message: String(e)}));
   }
 });
 
@@ -568,7 +568,7 @@ app.post('/distribute-shops', async (_req,res) => {
     console.error(`error ${e} occurred`);
     res
       .status(500)
-      .send(JSON.stringify({status: "error", code: "500", message: e.stringify()}));
+      .send(JSON.stringify({status: "error", code: "500", message: String(e)}));
   }
 });
 
